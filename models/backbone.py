@@ -19,16 +19,9 @@ class BackboneModel(nn.Module):
     head and returns the final backbone activation.
     """
 
-    def __init__(self, weights: Union[str, list[str]], map_location: Optional[torch.device] = None):
+    def __init__(self, config: Union[str, list[str]]):
         super().__init__()
-        loaded = attempt_load(weights, map_location=map_location)
-        if isinstance(loaded, Ensemble):
-            if len(loaded) != 1:
-                raise ValueError('BackboneModel expects a single-model checkpoint, not an ensemble.')
-            loaded = loaded[0]
-
-        if not isinstance(loaded, Model):
-            raise TypeError(f'Expected YOLO Model, received {type(loaded)}.')
+        loaded = Model(config)
 
         self.model: Model = loaded
         self._pool = nn.AdaptiveAvgPool2d((1, 1))
