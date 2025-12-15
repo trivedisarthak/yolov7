@@ -526,6 +526,7 @@ class Model(nn.Module):
             logger.info(f'Overriding model.yaml anchors with anchors={anchors}')
             self.yaml['anchors'] = round(anchors)  # override yaml value
         self.model, self.save = parse_model(deepcopy(self.yaml), ch=[ch])  # model, savelist
+        self.backbone_end = len(self.yaml.get('backbone', []))
         self.names = [str(i) for i in range(self.yaml['nc'])]  # default names
         # print([x.shape for x in self.forward(torch.zeros(1, ch, 64, 64))])
 
@@ -628,6 +629,45 @@ class Model(nn.Module):
 
         if profile:
             print('%.1fms total' % sum(dt))
+        return x
+
+    def forward_backbone(self, x, profile: bool = False):
+        """Runs a forward pass through the backbone only.
+
+        Args:
+            x: Input tensor.
+            profile (bool): Whether to profile FLOPs and latency for the backbone.
+
+        Returns:
+            The output tensor of the final backbone layer.
+        """
+
+        if self.backbone_end == 0:
+            raise RuntimeError('The loaded model does not define a backbone section.')
+
+        y, dt = [], []  # outputs
+        for m in self.model[:self.backbone_end]:
+            if m.f != -1:  # if not from previous layer
+                x = y[m.f] if isinstance(m.f, int) else [x if j == -1 else y[j] for j in m.f]
+
+            if profile:
+                c = isinstance(m, (Detect, IDetect, IAuxDetect, IBin))
+                o = thop.profile(m, inputs=(x.copy() if c else x,), verbose=False)[0] / 1E9 * 2 if thop else 0  # FLOPS
+                for _ in range(10):
+                    m(x.copy() if c else x)
+                t = time_synchronized()
+                for _ in range(10):
+                    m(x.copy() if c else x)
+                dt.append((time_synchronized() - t) * 100)
+                print('%10.1f%10.0f%10.1fms %-40s' % (o, m.np, dt[-1], m.type))
+
+            x = m(x)  # run
+
+            y.append(x if m.i in self.save else None)  # save output
+
+        if profile:
+            print('%.1fms total' % sum(dt))
+
         return x
 
     def _initialize_biases(self, cf=None):  # initialize biases into Detect(), cf is class frequency
